@@ -25,7 +25,11 @@
         min-height: 100vh;
         min-height: 100dvh;
         margin: 0;
-        padding: 24px;
+        --pad: 24px;
+        padding: var(--pad);
+        padding-left: max(var(--pad), env(safe-area-inset-left));
+        padding-right: max(var(--pad), env(safe-area-inset-right));
+        padding-bottom: max(var(--pad), env(safe-area-inset-bottom));
         display: grid;
         place-items: center;
         background: #0f2c24;
@@ -128,6 +132,8 @@
       }
 
       .play-area {
+        --canvas-h: max(520px, min(78vh, 720px));
+        --canvas-h: max(520px, min(78dvh, 720px));
         display: grid;
         grid-template-columns: minmax(0, 1fr) 220px;
         gap: 14px;
@@ -135,6 +141,8 @@
       }
 
       .board {
+        max-width: var(--canvas-h);
+        margin-inline: auto;
         overflow: hidden;
         border: 1px solid rgba(224, 238, 181, 0.38);
         border-radius: 18px;
@@ -145,9 +153,7 @@
       canvas {
         display: block;
         width: 100%;
-        height: min(78vh, 720px);
-        height: min(78dvh, 720px);
-        min-height: 520px;
+        height: var(--canvas-h);
         touch-action: none;
         -webkit-user-select: none;
         user-select: none;
@@ -334,7 +340,7 @@
 
       @media (max-width: 680px) {
         body {
-          padding: 12px;
+          --pad: 12px;
           align-items: start;
         }
 
@@ -345,13 +351,8 @@
 
         .play-area {
           grid-template-columns: minmax(0, 1fr);
-        }
-
-        canvas {
-          height: calc(100vh - 190px);
-          height: calc(100dvh - 190px);
-          min-height: 360px;
-          max-height: 620px;
+          --canvas-h: clamp(360px, calc(100vh - 190px), 620px);
+          --canvas-h: clamp(360px, calc(100dvh - 190px), 620px);
         }
 
         .hud {
@@ -373,7 +374,7 @@
         }
       }
 
-      @media (max-width: 430px) {
+      @media (max-width: 480px) {
         .topbar {
           align-items: flex-start;
         }
@@ -385,7 +386,7 @@
         }
 
         body {
-          padding: 8px;
+          --pad: 8px;
         }
 
         .game {
@@ -418,7 +419,7 @@
          所以遊戲區照螢幕高度縮成直的，分數和設定放在右邊，可以自己捲動。 */
       @media (max-height: 500px) and (orientation: landscape) {
         body {
-          padding: 6px;
+          --pad: 6px;
           align-items: start;
         }
 
@@ -442,26 +443,20 @@
         }
 
         .play-area {
-          grid-template-columns: auto minmax(150px, 220px);
+          grid-template-columns: auto minmax(130px, 220px);
           justify-content: center;
+          --canvas-h: max(240px, calc(100vh - 90px));
+          --canvas-h: max(240px, calc(100dvh - 90px));
         }
 
         .board {
-          width: calc((100vh - 76px) * 0.8);
-          width: calc((100dvh - 76px) * 0.8);
-        }
-
-        canvas {
-          height: calc(100vh - 76px);
-          height: calc(100dvh - 76px);
-          min-height: 240px;
-          max-height: none;
+          width: min(calc(var(--canvas-h) * 0.8), calc(100vw - 200px));
         }
 
         .sidebar {
           display: flex;
           flex-direction: column;
-          max-height: calc(100dvh - 76px);
+          max-height: var(--canvas-h);
           overflow-y: auto;
         }
 
@@ -628,6 +623,8 @@
       let touchAiming = false;
       let touchPointerId = null;
       let aimSet = false;
+      // 泡泡還在飛、或整片正在往下降時放開手指：先記著，等可以射了再自動射（不會被吃掉）
+      let pendingShot = null;
       try { bestScore = Number(localStorage.getItem(BEST_KEY)) || 0; } catch (error) { bestScore = 0; }
 
       function isShiftedRow(row) {
@@ -738,6 +735,7 @@
         pauseButton.setAttribute('aria-pressed', String(paused));
         if (paused) {
           pausedAt = performance.now();
+          pendingShot = null;
           stopMusic();
           if (audioContext?.state === 'running') audioContext.suspend().catch(() => {});
         } else {
@@ -800,6 +798,7 @@
         lastDisplayedDescent = descentTimer;
         dropsThisLevel = 0;
         rowParity = 0;
+        pendingShot = null;
         touchAiming = false;
         board = [];
         const rowCount = gameMode === 'campaign' || gameMode === 'falling'
@@ -880,23 +879,40 @@
         return { x: width / 2, y: height - radius * 1.4 };
       }
 
+      function flightStep() {
+        return radius * 0.5;
+      }
+
+      // 泡泡往前走一小步：撞到左右牆反彈；回傳有沒有反彈、有沒有碰到泡泡或天花板。
+      // 瞄準線和真正發射都用這一個，所以預測的落點跟實際落點一模一樣。
+      function stepFlight(state) {
+        const step = flightStep();
+        state.x += state.ux * step;
+        state.y += state.uy * step;
+        let bounced = false;
+        if (state.x < radius) {
+          state.x = radius;
+          state.ux = Math.abs(state.ux);
+          bounced = true;
+        } else if (state.x > width - radius) {
+          state.x = width - radius;
+          state.ux = -Math.abs(state.ux);
+          bounced = true;
+        }
+        return { bounced, hit: state.y <= radius || touchesBubble(state.x, state.y) };
+      }
+
       // 算出泡泡會走的路線：撞到左右牆反彈，碰到泡泡或天花板就停
       function aimPath(shooter, dx, dy) {
         const length = Math.hypot(dx, dy) || 1;
-        let x = shooter.x;
-        let y = shooter.y;
-        let vx = dx / length;
-        const vy = dy / length;
-        const points = [{ x, y }];
-        const step = radius * 0.5;
+        const state = { x: shooter.x, y: shooter.y, ux: dx / length, uy: dy / length };
+        const points = [{ x: state.x, y: state.y }];
         for (let i = 0; i < 4000; i += 1) {
-          x += vx * step;
-          y += vy * step;
-          if (x < radius) { x = radius; vx = Math.abs(vx); points.push({ x, y }); }
-          else if (x > width - radius) { x = width - radius; vx = -Math.abs(vx); points.push({ x, y }); }
-          if (y <= radius || touchesBubble(x, y)) break;
+          const result = stepFlight(state);
+          if (result.bounced) points.push({ x: state.x, y: state.y });
+          if (result.hit) break;
         }
-        points.push({ x, y });
+        points.push({ x: state.x, y: state.y });
         return points;
       }
 
@@ -1182,7 +1198,8 @@
               currentLevel += 1;
               roundLabelElement.textContent = `關卡 ${String(currentLevel).padStart(2, '0')} / 50`;
               startLevel();
-              if (musicEnabled) startMusic();
+              if (document.hidden) setPaused(true);
+              else if (musicEnabled) startMusic();
             }, 1800);
           }
         } else {
@@ -1234,11 +1251,15 @@
       }
 
       function shoot(targetX, targetY) {
-        if (projectile || gameOver || paused || boardDropAnimation) return;
+        if (gameOver || paused) return;
         const shooter = shooterPosition();
         const dx = targetX - shooter.x;
         const dy = targetY - shooter.y;
         if (dy >= -radius * 0.4) return;
+        if (projectile || boardDropAnimation) {
+          pendingShot = { x: targetX, y: targetY };
+          return;
+        }
         gameStarted = true;
         if (gameMode === 'shots') {
           shotsRemaining -= 1;
@@ -1250,8 +1271,12 @@
         projectile = {
           x: shooter.x,
           y: shooter.y,
+          ux: dx / length,
+          uy: dy / length,
           vx: (dx / length) * speed,
           vy: (dy / length) * speed,
+          speed,
+          travel: 0,
           color: currentColor,
         };
         ensureAudio();
@@ -1260,29 +1285,14 @@
 
       function updateProjectile(deltaTime) {
         if (!projectile) return;
-        projectile.x += projectile.vx * deltaTime;
-        projectile.y += projectile.vy * deltaTime;
-
-        if (projectile.x < radius) {
-          projectile.x = radius;
-          projectile.vx = Math.abs(projectile.vx);
-        } else if (projectile.x > width - radius) {
-          projectile.x = width - radius;
-          projectile.vx = -Math.abs(projectile.vx);
-        }
-
-        let hit = projectile.y <= radius;
-        if (!hit) {
-          for (let row = 0; row < board.length && !hit; row += 1) {
-            for (let column = 0; column < columns; column += 1) {
-              if (board[row]?.[column] === undefined) continue;
-              const center = bubbleCenter(row, column);
-              if (Math.hypot(center.x - projectile.x, center.y - projectile.y) < radius * 1.9) {
-                hit = true;
-                break;
-              }
-            }
-          }
+        // 這一格畫面該走多遠，就一小步一小步走（跟瞄準線同一套），途中碰到就停
+        projectile.travel += projectile.speed * deltaTime;
+        let hit = false;
+        while (projectile.travel >= flightStep()) {
+          projectile.travel -= flightStep();
+          const result = stepFlight(projectile);
+          projectile.vx = projectile.ux * projectile.speed;
+          if (result.hit) { hit = true; break; }
         }
 
         if (hit) {
@@ -1330,6 +1340,11 @@
           if (descentTimer <= 0) dropField();
         }
         if (!gameOver) updateProjectile(deltaTime);
+        if (pendingShot && !projectile && !boardDropAnimation && !gameOver) {
+          const queued = pendingShot;
+          pendingShot = null;
+          shoot(queued.x, queued.y);
+        }
         draw();
         window.requestAnimationFrame(animate);
       }
@@ -1350,11 +1365,12 @@
       });
       canvas.addEventListener('pointerdown', (event) => {
         event.preventDefault();
+        if (isTouchLike(event) && touchAiming) return;   // 第二根手指：不理它
         aimSet = true;
         updateAim(event);
         startMusic();
         if (isTouchLike(event)) {
-          if (touchAiming || gameOver || paused) return;
+          if (gameOver || paused) return;
           touchAiming = true;
           touchPointerId = event.pointerId;
           try { canvas.setPointerCapture(event.pointerId); } catch (error) { /* 不支援也沒關係 */ }

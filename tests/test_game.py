@@ -190,6 +190,49 @@ def test_other_finger_ignored():
     assert r == {"keep": True, "still": True}
 
 
+def test_second_finger_down_does_not_move_aim():
+    """第二根手指按下去，瞄準線不會跳過去（之前會跳到第二根手指的位置）。"""
+    r, _ = run("""
+      __fire('gameCanvas', 'pointerdown', {pointerType: 'touch', pointerId: 1, clientX: 70, clientY: 190});
+      __fire('gameCanvas', 'pointerdown', {pointerType: 'touch', pointerId: 2, clientX: 315, clientY: 120});
+      return {x: aim.x, y: aim.y, aiming: touchAiming && touchPointerId === 1};
+    """)
+    assert r == {"x": 70, "y": 190, "aiming": True}
+
+
+def test_release_during_drop_is_queued():
+    """整片正在往下降、或上一顆還在飛的時候放開手指：不會被吃掉，等一下自動射出去。"""
+    r, _ = run("""
+      __els.modeSelect.value = 'shots'; resetGame();
+      boardDropAnimation = {startedAt: performance.now(), firstRow: 1};
+      touchAim(width / 2, 20);
+      const waiting = projectile === null && shotsRemaining === 25;
+      tick(1);
+      const fired1 = shotsRemaining === 24;
+      tick(3);   // 等第一顆落地
+      // 上一顆還在飛時再放開一次
+      shoot(width / 2, 20);
+      const flying = projectile !== null;
+      touchAim(width / 2 - 30, 20);
+      tick(3);
+      return {waiting, fired1, flying, fired2: shotsRemaining === 22};
+    """)
+    assert r == {"waiting": True, "fired1": True, "flying": True, "fired2": True}
+
+
+def test_level_advance_in_background_pauses():
+    """過關畫面時切到別的 App：下一關準備好但先暫停，不會在背景自己開始。"""
+    r, _ = run("""
+      __els.modeSelect.value = 'campaign'; resetGame();
+      setBoard([[0, 0]]);
+      finishTurn(0, 2, 0);
+      document.hidden = true;
+      tick(2);
+      return {level: currentLevel, paused};
+    """)
+    assert r == {"level": 2, "paused": True}
+
+
 def test_mouse_click_shoots_immediately():
     """電腦：滑鼠點一下就發射（維持原本的玩法）。"""
     r, _ = run("""
@@ -212,21 +255,34 @@ def test_aim_path_bounces_inside_walls():
 
 
 def test_shot_lands_where_path_ends():
-    """實際射出去的泡泡，停在瞄準路線的終點附近（瞄準線沒有騙人）。"""
+    """瞄準線沒有騙人：每個角度實際射出去，泡泡都停在瞄準路線終點那一格（之前約 16% 的角度會差一格）。"""
     r, _ = run("""
-      const s = shooterPosition();
-      const tx = s.x - 120, ty = s.y - 200;
-      const path = aimPath(s, tx - s.x, ty - s.y);
-      const end = path[path.length - 1];
-      const spot = findNearestEmpty(end.x, end.y);
-      const before = JSON.stringify(board);
-      shoot(tx, ty);
-      tick(3);
-      // 找出新放上去的那一格（或被消掉）
-      return {flew: projectile === null, spotOk: spot !== null};
+      const misses = [];
+      let total = 0;
+      for (const mode of ['classic', 'falling']) {
+        for (let deg = -80; deg <= 80; deg += 4) {
+          __els.modeSelect.value = mode; resetGame();
+          // 盤面只用 0～2 號色，射 5 號色：不會消，落點一定看得到
+          setBoard(board.map((row, r) => row.map((c, k) => (r + k) % 3)));
+          currentColor = 5;
+          const s = shooterPosition(), a = deg * Math.PI / 180;
+          const tx = s.x + Math.sin(a) * 100, ty = s.y - Math.cos(a) * 100;
+          const path = aimPath(s, tx - s.x, ty - s.y);
+          const end = path[path.length - 1];
+          const want = findNearestEmpty(end.x, end.y);
+          shoot(tx, ty);
+          // 一落地就停（很斜的角度要在牆壁之間彈好幾次；也不能等太久，不然碰到 8 秒一次的下降）
+          for (let t = 0; t < 100 && projectile; t++) tick(0.1);
+          let got = null;
+          board.forEach((row, rr) => row && row.forEach((c, k) => { if (c === 5) got = {row: rr, column: k}; }));
+          total += 1;
+          if (!got || got.row !== want.row || got.column !== want.column) misses.push(mode + ' ' + deg);
+        }
+      }
+      return {total, misses};
     """)
-    assert r == {"flew": True, "spotOk": True}
-
+    assert r["total"] == 82
+    assert r["misses"] == []
 
 def test_hidden_page_pauses():
     """手機切到別的 App：遊戲自動暫停（限時模式不會偷偷倒數）。"""
