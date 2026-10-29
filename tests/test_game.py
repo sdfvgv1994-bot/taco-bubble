@@ -348,3 +348,20 @@ def test_no_audio_does_not_crash():
       return {ok: true, music: musicEnabled};
     """)
     assert r == {"ok": True, "music": True}
+
+
+def test_descent_only_drops_every_8_seconds():
+    """下降挑戰：只有每 8 秒降一排，射泡泡不會額外降（原版每射一顆也會降一排）。"""
+    r, _ = run("""
+      __els.modeSelect.value = 'descent'; resetGame();
+      setBoard(board.map((row, r) => row.map((c, k) => (r + k) % 3)));
+      currentColor = 5;
+      const top0 = JSON.stringify(board[0]);
+      shoot(width / 2, 20);
+      for (let t = 0; t < 30 && projectile; t++) tick(0.1);
+      const sameTop = JSON.stringify(board[0]) === top0;      // 射完：最上面那排沒變＝沒有額外降
+      tick(8.5);
+      const movedDown = JSON.stringify(board[1]) === top0;    // 8 秒到：原本最上排被往下推一排
+      return {sameTop, movedDown};
+    """)
+    assert r == {"sameTop": True, "movedDown": True}

@@ -1203,7 +1203,7 @@
             }, 1800);
           }
         } else {
-          if (gameMode === 'descent') dropField();
+          // 下降挑戰只照「每 8 秒降一排」，射泡泡不會額外降（老闆 10/29 決定，跟選單寫的一致）
           if (!gameOver) checkGameOver();
           if (!gameOver && gameMode === 'shots' && shotsRemaining === 0) {
             gameOver = true;
