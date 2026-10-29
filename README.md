@@ -1,5 +1,9 @@
 # 泡泡花園 Bubble Garden
 
+### 👉 [點這裡開始玩](https://sdfvgv1994-bot.github.io/taco-bubble/)
+
+網址：https://sdfvgv1994-bot.github.io/taco-bubble/ （電腦、手機都能玩）
+
 泡泡龍玩法的網頁小遊戲：發射泡泡，讓 3 顆以上同色連在一起就會消掉，吊在下面的泡泡跟著掉落有額外分數。
 
 - 6 種模式：經典花園、闖關 50 關、下降闖關 50 關、限時 60 秒、限球 25 顆、下降挑戰
