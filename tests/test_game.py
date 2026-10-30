@@ -28,7 +28,8 @@ BLOCKS = ["elements", "config", "state", "sound", "board", "flight", "draw", "ga
 
 
 def script_srcs():
-    return re.findall(r'<script\b[^>]*\bsrc="([^"]+)"', HTML.read_text(encoding="utf-8"))
+    # 雙引號、單引號都認得，不會悄悄漏掉某個積木
+    return re.findall(r'<script\b[^>]*\bsrc=["\']([^"\']+)["\']', HTML.read_text(encoding="utf-8"))
 
 
 def test_page_files():

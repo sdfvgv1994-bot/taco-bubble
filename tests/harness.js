@@ -9,7 +9,7 @@ const vm = require('vm');
 const htmlPath = process.argv[2];
 const html = fs.readFileSync(htmlPath, 'utf8');
 // 任何 <script ... src="..."> 寫法都認得（例如以後加了 defer），不會悄悄跳過某個積木
-const srcs = [...html.matchAll(/<script\b[^>]*\bsrc="([^"?]+)(?:\?[^"]*)?"/g)].map((m) => m[1]);
+const srcs = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"'?]+)(?:\?[^"']*)?["']/g)].map((m) => m[1]);
 if (!srcs.length) throw new Error('index.html 裡找不到 <script src>');
 const blocks = srcs.map((s) => ({ name: s, code: fs.readFileSync(path.join(path.dirname(htmlPath), s), 'utf8') }));
 const testCode = process.argv[3];
