@@ -24,23 +24,47 @@ def run(js, store=None):
     return data["out"], data["store"]
 
 
+BLOCKS = ["elements", "config", "state", "sound", "board", "flight", "draw", "game", "input", "main"]
+
+
+def script_srcs():
+    return re.findall(r'<script\b[^>]*\bsrc="([^"]+)"', HTML.read_text(encoding="utf-8"))
+
+
 def test_page_files():
     """網頁本身：手機狀態列、遊戲區不會被拖去捲動網頁、版本號、部署流程先跑測試。"""
     html = HTML.read_text(encoding="utf-8")
+    css = (ROOT / "style.css").read_text(encoding="utf-8")
     for el in ["hudScore", "hudBest", "hudNext", "hudStatus", "gameCanvas", "modeSelect", "ver"]:
         assert f'id="{el}"' in html, el
-    assert re.search(r"canvas\s*\{[^}]*touch-action:\s*none", html)
+    assert re.search(r"canvas\s*\{[^}]*touch-action:\s*none", css)
     assert '<meta name="app-version" content="dev"' in html
+    assert '<link rel="stylesheet" href="style.css?v=dev" />' in html
+    assert "<style>" not in html
     wf = (ROOT / ".github" / "workflows" / "pages.yml").read_text(encoding="utf-8")
     assert "pytest" in wf and "needs: test" in wf and "app-version" in wf
 
 
-def test_script_syntax(tmp_path):
-    """遊戲程式語法正確。"""
-    script = re.search(r"<script>(.*)</script>", HTML.read_text(encoding="utf-8"), re.S).group(1)
-    f = tmp_path / "game.js"
-    f.write_text(script, encoding="utf-8")
-    subprocess.run(["node", "--check", str(f)], check=True)
+def test_blocks_load_in_order():
+    """積木照固定順序載入、每個都帶 ?v=dev（上線換成版本號，手機才不會新舊檔混用），沒有內嵌程式。"""
+    assert script_srcs() == [f"js/{b}.js?v=dev" for b in BLOCKS]
+    assert "<script>" not in HTML.read_text(encoding="utf-8")
+    # js 資料夾裡沒有被忘記接上的積木
+    assert sorted(p.stem for p in (ROOT / "js").glob("*.js")) == sorted(BLOCKS)
+
+
+def test_deploy_copies_all_blocks():
+    """上線流程要把 css、js 一起放上去，並把每個 ?v=dev 換成版本號，漏換就讓上線失敗。"""
+    wf = (ROOT / ".github" / "workflows" / "pages.yml").read_text(encoding="utf-8")
+    assert re.search(r"cp -r index\.html style\.css js site/", wf)
+    assert 's#?v=dev\\"#?v=$v\\"#g' in wf
+    assert 'if grep -q "v=dev" site/index.html; then' in wf and "exit 1" in wf
+
+
+def test_script_syntax():
+    """每個積木語法都正確。"""
+    for b in BLOCKS:
+        subprocess.run(["node", "--check", str(ROOT / "js" / f"{b}.js")], check=True)
 
 
 def test_start_state():
